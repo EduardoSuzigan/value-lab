@@ -81,6 +81,83 @@ def parse(raw: pd.DataFrame, league: str, season: str) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
+# --- Feed "/new/": liga em arquivo único, todas as temporadas (ex.: Brasil) ---
+# Formato diferente do mmz4281: colunas Home/Away/HG/AG, Season=ano civil, e SÓ
+# odds de FECHAMENTO (sem abertura). Por isso CLV não é computável p/ estas ligas
+# (calibração sim) — caveat registrado no CLAUDE.md.
+
+NEW_BASE_URL = "https://www.football-data.co.uk/new"
+
+_NEW_CORE = ("Date", "Home", "Away", "HG", "AG")
+# No feed novo, B365C é esparso (~18% no BRA) e o AvgC (média do mercado) tem
+# cobertura completa; preferir Avg → Pinnacle → B365 (inverso das europeias).
+_NEW_CLOSING = (
+    ("AvgCH", "AvgCD", "AvgCA"),
+    ("PSCH", "PSCD", "PSCA"),
+    ("B365CH", "B365CD", "B365CA"),
+)
+
+
+def new_feed_url(fd_code: str) -> str:
+    """URL do feed único da liga no formato novo (ex.: '.../new/BRA.csv')."""
+    return f"{NEW_BASE_URL}/{fd_code}.csv"
+
+
+def parse_new(raw: pd.DataFrame, league: str, season: str) -> pd.DataFrame:
+    """Normaliza o feed novo p/ o schema Match/Odds, filtrando por temporada.
+
+    Sem odds de abertura no feed → `o_*` ficam NaN. Levanta ValueError se faltarem
+    colunas essenciais ou as odds de fechamento.
+    """
+    missing = [c for c in _NEW_CORE if c not in raw.columns]
+    if missing:
+        raise ValueError(f"colunas essenciais ausentes no feed novo: {missing}")
+    close_cols = _pick_triplet(raw, _NEW_CLOSING)
+    if close_cols is None:
+        raise ValueError("feed novo sem colunas de odds de fechamento 1X2")
+
+    df = raw[raw["Season"].astype(str) == str(season)].copy()
+    df = df.dropna(subset=["HG", "AG"])  # só jogos disputados
+
+    out = pd.DataFrame(
+        {
+            "date": pd.to_datetime(df["Date"], dayfirst=True, errors="coerce"),
+            "league": league,
+            "season": str(season),
+            "home": df["Home"].astype("string").str.strip(),
+            "away": df["Away"].astype("string").str.strip(),
+            "home_goals": df["HG"].astype(int),
+            "away_goals": df["AG"].astype(int),
+        }
+    )
+    for sel in ("home", "draw", "away"):
+        out[f"o_{sel}"] = float("nan")  # feed novo não traz abertura
+    for sel, cc in zip(("home", "draw", "away"), close_cols, strict=True):
+        out[f"c_{sel}"] = pd.to_numeric(df[cc], errors="coerce").to_numpy()
+
+    return out.reset_index(drop=True)
+
+
+def download_new(
+    fd_code: str, fetcher: Callable[[str], bytes] | None = None
+) -> pd.DataFrame:
+    """Baixa o feed único (todas as temporadas). `fetcher` injetável p/ testes."""
+    fetch = fetcher or _http_get
+    payload = fetch(new_feed_url(fd_code))
+    return pd.read_csv(io.BytesIO(payload), encoding="utf-8-sig")
+
+
+def load_new(
+    league: str,
+    season: str,
+    fd_code: str | None = None,
+    fetcher: Callable[[str], bytes] | None = None,
+) -> pd.DataFrame:
+    """download_new + parse_new → Match/Odds de uma liga/temporada (feed novo)."""
+    raw = download_new(fd_code or league, fetcher=fetcher)
+    return parse_new(raw, league=league, season=season)
+
+
 def download(
     fd_code: str, season: str, fetcher: Callable[[str], bytes] | None = None
 ) -> pd.DataFrame:

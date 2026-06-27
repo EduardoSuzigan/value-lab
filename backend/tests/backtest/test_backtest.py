@@ -169,3 +169,22 @@ class TestValidation:
         df = _synth_league().drop(columns=["c_home"])
         with pytest.raises(ValueError):
             bt.walk_forward_clv(df, min_history=60)
+
+
+class TestClosingOnlyLeague:
+    """Ligas sem odds de abertura (ex.: Brasil/feed novo): o walk-forward não pode
+    quebrar e não há value bets (sem preço de entrada → sem CLV); a calibração,
+    que não usa odds, continua válida."""
+
+    def test_missing_opening_odds_yields_calibration_but_no_bets(self):
+        df = _synth_league(seed=7, seasons=4)
+        # load_matches_df devolve None (SQL NULL) p/ ligas sem abertura — não NaN
+        df[["o_home", "o_draw", "o_away"]] = None
+
+        res = bt.walk_forward_clv(df, min_history=60, retrain_every=10)
+
+        assert res.n_bets == 0
+        assert res.beat_closing_rate is None
+        assert res.avg_ev is None
+        assert not math.isnan(res.brier)  # calibração calculada normalmente
+        assert res.n_matches > 0

@@ -143,9 +143,12 @@ def walk_forward_clv(
             cal_probs.append(probs[sel])
             cal_outcomes.append(1 if sel == realized else 0)
 
-        opening = {s: float(df.at[i, f"o_{s}"]) for s in _SELECTIONS}
-        closing = {s: float(df.at[i, f"c_{s}"]) for s in _SELECTIONS}
-        bets.extend(evaluate_value_bets(probs, opening, closing, ev_threshold))
+        # Ligas sem odds de abertura (ex.: Brasil) não têm preço de entrada → sem
+        # value bet/CLV; a calibração acima (não usa odds) segue valendo.
+        opening = _odds_row(df, i, "o")
+        closing = _odds_row(df, i, "c")
+        if opening is not None and closing is not None:
+            bets.extend(evaluate_value_bets(probs, opening, closing, ev_threshold))
 
         preds.append(
             {
@@ -210,6 +213,18 @@ def _maybe_refit(df, i, model, last_fit_at, retrain_every, xi, home, away):
         model = dc.fit(train, xi=xi)
         last_fit_at = i
     return model, last_fit_at
+
+
+def _odds_row(df: pd.DataFrame, i: int, prefix: str) -> dict[str, float] | None:
+    """Tripla de odds (home/draw/away) na linha `i`, ou None se faltar alguma
+    (NULL/NaN) — caso das ligas sem odds de abertura."""
+    vals: dict[str, float] = {}
+    for sel in _SELECTIONS:
+        v = df.at[i, f"{prefix}_{sel}"]
+        if pd.isna(v):
+            return None
+        vals[sel] = float(v)
+    return vals
 
 
 def _result(home_goals, away_goals) -> str:

@@ -51,6 +51,26 @@ def test_pipeline_etl_then_train(session):
     assert summary[("E0", "2324")]["run_id"] is not None
 
 
+def test_pipeline_dispatches_bra_to_new_feed(session):
+    """BRA usa o feed /new/ (arquivo único); o worker deve baixar via load_new."""
+    payload = (
+        Path(__file__).parents[1] / "etl" / "fixtures" / "bra_sample.csv"
+    ).read_bytes()
+    seen = {}
+
+    def fetcher(url: str) -> bytes:
+        seen["url"] = url
+        return payload
+
+    run_pipeline(session, seasons=["2025"], codes=["BRA"], fetcher=fetcher)
+
+    assert seen["url"].endswith("/new/BRA.csv")  # feed único, não mmz4281
+    from app.models import League
+
+    assert session.query(League).filter_by(code="BRA").one().name.startswith("Brasil")
+    assert session.query(Match).count() == 2  # 2025 disputados na amostra
+
+
 def test_pipeline_persists_but_skips_train_when_too_few_matches(session):
     sample = _SAMPLE.read_bytes()
     summary = run_pipeline(

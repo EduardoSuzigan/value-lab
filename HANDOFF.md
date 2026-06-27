@@ -18,7 +18,7 @@ _Atualizado: 2026-06-27. Branch de trabalho: **`development`** (toda execução 
 | domínio | `backend/app/domain/dixon_coles.py` | Poisson bivariado + tau(rho) + decaimento(xi), MLE L-BFGS-B, `predict()` 1X2/OU2.5/BTTS |
 | services | `backend/app/services/backtest.py` | walk-forward de CLV (sem look-ahead) + calibração, `base_rate_brier` |
 | etl | `backend/app/etl/sources/registry.py` | registro de fontes por liga (5 europeias + Brasil) |
-| etl | `backend/app/etl/football_data.py` | `season_url`/`parse`/`download`/`load` → schema **Match/Odds** normalizado (odds de abertura+fechamento) |
+| etl | `backend/app/etl/football_data.py` | `parse`/`load` (feed `mmz4281`, EU, abertura+fechamento) **+ `parse_new`/`load_new`** (feed `/new/`, Brasil: arquivo único, só fechamento). Registry tem campo `feed`; worker despacha. |
 | config | `backend/app/config.py` | `Settings` via env/.env (db, odds_api_key, cron_secret, kelly) |
 | models | `backend/app/models.py` | SQLAlchemy 2.0: Team, League, Match (placar None=futuro), Odds, ModelRun (por liga, append-only), Prediction (por run+match+market+selection) |
 | db | `backend/app/db.py` | engine/session; `make_engine` (StaticPool + PRAGMA FK p/ SQLite); aponta `settings.database_url` |
@@ -33,14 +33,18 @@ _Atualizado: 2026-06-27. Branch de trabalho: **`development`** (toda execução 
 Confirma a tese do projeto: probabilidades confiáveis ≠ vencer a linha de fechamento.
 
 **Persistência (Fase 1) PRONTA** — Neon Postgres 17 (sa-east-1) provisionado; `DATABASE_URL`
-em `backend/.env` (gitignored). Pipeline validado ponta a ponta no Neon: **E0 ingerido**
-(1140 jogos / 3 temporadas 2324–2526, 3 ModelRuns, 7980 Predictions); backtest lê do banco
-via `load_matches_df`. **87 testes verdes** (incl. guarda de drift de migration), ruff limpo.
+em `backend/.env` (gitignored). Pipeline validado ponta a ponta no Neon. **6 ligas ingeridas**
+(5 europeias 2324–2526 via `mmz4281` + **Brasil** 2023–2025 via feed `/new/`); backtest lê do
+banco via `load_matches_df`. **94 testes verdes** (incl. guarda de drift de migration), ruff limpo.
 
-**Ainda NÃO existe:** camada `api/` (read-API serverless), frontend, GitHub Actions
-(`train.yml`). E o **Brasil (BRA) ainda não ingere**: o football-data serve a BRA no feed
-`/new/BRA.csv` (arquivo único, colunas diferentes), não no `mmz4281/{season}/` que o
-`season_url` monta — precisa de um parser próprio (usar skill `add-league`).
+- **Brasil = só calibração, sem CLV.** O feed `/new/BRA.csv` traz só odds de FECHAMENTO
+  (sem abertura) → `Odds.open=None`, sem preço de entrada → sem value bet/CLV. O walk-forward
+  ignora bets quando falta abertura e ainda calcula calibração (BRA 2025: Brier 0.202 < base 0.212).
+- **Reprodutibilidade:** o fit Dixon-Coles tem leve deriva entre processos/ambientes (~0.5pp no
+  beat_closing; Brier idêntico). Estável dentro do mesmo ambiente. Se virar problema, fixar
+  threads de BLAS / semente do otimizador.
+
+**Ainda NÃO existe:** camada `api/` (read-API serverless), frontend, GitHub Actions (`train.yml`).
 
 ---
 
@@ -73,27 +77,24 @@ via `load_matches_df`. **87 testes verdes** (incl. guarda de drift de migration)
 
 ## 4. Fase 1 — fechada (persistência + multi-liga). O que falta
 
-Itens 1–5 **prontos** (TDD; ver tabela da seção 1). Item 6 **parcial**: 4 europeias
-ingeridas, Brasil pendente. **Decisões resolvidas nesta sessão:**
+Itens 1–6 **prontos** (TDD; ver tabela da seção 1). 6 ligas ingeridas no Neon
+(5 europeias + Brasil). **Decisões resolvidas nesta sessão:**
 (a) **Neon** p/ app+migrations, **SQLite in-memory** p/ testes (schema dialect-agnóstico);
 (b) `Prediction` por **(run, match, market, selection)** — todos os mercados de uma vez;
 (c) backtest **lê do banco** via `load_matches_df`, mantendo o `walk_forward_clv` puro.
 
 Próximos passos:
 
-1. **Brasil (BRA)** — adicionar parser do feed `/new/BRA.csv` (arquivo único, todas as
-   temporadas, colunas de odds diferentes; filtrar por ano). Usar skill `add-league`.
-   Só então `worker.run --leagues BRA`.
-2. **Perf do upsert** — hoje é linha-a-linha sobre a rede (~3 min/liga/3 temporadas no Neon).
+1. **Perf do upsert** — hoje é linha-a-linha sobre a rede (~3 min/liga/3 temporadas no Neon).
    Trocar por `bulk_insert`/batch quando incomodar (não muda correção, só velocidade).
-3. **Fase 2 — Odds ao vivo + deploy:** The Odds API (captura write-once da linha de
+2. **Fase 2 — Odds ao vivo + deploy:** The Odds API (captura write-once da linha de
    FECHAMENTO — não sobrescrever como o ETL atual faz), `train.yml` no Actions, endpoint
    leve `refresh-odds`/`recompute-value` na Vercel + scheduler externo.
-4. **Camada `api/`** — read-API serverless (sem scipy): `/api/clv`, `/api/calibration`,
+3. **Camada `api/`** — read-API serverless (sem scipy): `/api/clv`, `/api/calibration`,
    jogos+probabilidades+value bets a partir de `ModelRun`/`Prediction`/`Odds` pré-computados.
-5. **Mercados OU25/BTTS no ETL** — `Prediction`/schema já suportam; falta o parser de odds
+4. **Mercados OU25/BTTS no ETL** — `Prediction`/schema já suportam; falta o parser de odds
    desses mercados em `football_data.py` (hoje só persiste 1X2).
-6. **Fase 3 — Frontend:** dashboard por liga + painéis de CLV histórico e calibração.
+5. **Fase 3 — Frontend:** dashboard por liga + painéis de CLV histórico e calibração.
 
 ### Verificação rápida ao abrir a sessão
 ```bash

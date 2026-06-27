@@ -38,7 +38,10 @@ def run_pipeline(
     for code in codes:
         src = registry.get_source(code)
         for season in seasons:
-            df = fd.load(code, season, fd_code=src.fd_code, fetcher=fetcher)
+            if src.feed == "new":  # feed único (Brasil): só fechamento, sem CLV
+                df = fd.load_new(code, season, fd_code=src.fd_code, fetcher=fetcher)
+            else:
+                df = fd.load(code, season, fd_code=src.fd_code, fetcher=fetcher)
             upsert_matches(session, df)
             entry: dict = {"matches": len(df), "run_id": None}
             try:

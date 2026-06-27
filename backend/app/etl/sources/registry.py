@@ -16,17 +16,20 @@ class LeagueSource:
     name: str
     country: str
     fd_code: str       # código no football-data.co.uk (ex.: E0, SP1, D1, BRA)
+    feed: str = "mmz4281"  # "mmz4281" (europeias, por temporada) | "new" (Brasil)
     experimental: bool = False
 
 
 # MVP: 5 europeias sólidas + Brasil. Saudi (SAU) entra como experimental na Fase 1+.
+# As europeias usam o feed mmz4281/{season}/{code}.csv; o Brasil usa o feed único
+# /new/BRA.csv (ano civil, só odds de fechamento → sem CLV, só calibração).
 _LEAGUES: dict[str, LeagueSource] = {
     "E0": LeagueSource("E0", "Premier League", "England", "E0"),
     "SP1": LeagueSource("SP1", "La Liga", "Spain", "SP1"),
     "D1": LeagueSource("D1", "Bundesliga", "Germany", "D1"),
     "I1": LeagueSource("I1", "Serie A", "Italy", "I1"),
     "F1": LeagueSource("F1", "Ligue 1", "France", "F1"),
-    "BRA": LeagueSource("BRA", "Brasileirão Série A", "Brazil", "BRA"),
+    "BRA": LeagueSource("BRA", "Brasileirão Série A", "Brazil", "BRA", feed="new"),
 }
 
 
