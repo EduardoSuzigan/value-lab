@@ -20,14 +20,27 @@ _Atualizado: 2026-06-27. Branch de trabalho: **`development`** (toda execução 
 | etl | `backend/app/etl/sources/registry.py` | registro de fontes por liga (5 europeias + Brasil) |
 | etl | `backend/app/etl/football_data.py` | `season_url`/`parse`/`download`/`load` → schema **Match/Odds** normalizado (odds de abertura+fechamento) |
 | config | `backend/app/config.py` | `Settings` via env/.env (db, odds_api_key, cron_secret, kelly) |
+| models | `backend/app/models.py` | SQLAlchemy 2.0: Team, League, Match (placar None=futuro), Odds, ModelRun (por liga, append-only), Prediction (por run+match+market+selection) |
+| db | `backend/app/db.py` | engine/session; `make_engine` (StaticPool + PRAGMA FK p/ SQLite); aponta `settings.database_url` |
+| migr | `backend/alembic/` | env.py lê Settings, `render_as_batch` só em SQLite; migration inicial aplicada no Neon; teste de drift |
+| etl | `backend/app/etl/persist.py` | `upsert_matches`: DataFrame → Match/Odds, upsert idempotente (chave liga+season+home+away); nunca toca Prediction |
+| services | `backend/app/services/dataset.py` | `load_matches_df`: Match/Odds do banco → DataFrame do backtest (decisão c) |
+| services | `backend/app/services/train.py` | `train_league`: fit por (liga,temporada) → 1 ModelRun + Predictions (7 mercados/jogo), append-only |
+| worker | `backend/worker/run.py` | entrypoint `python -m worker.run --seasons … [--leagues …]`: ETL→train, sem HTTP |
 
 **Resultado honesto em dados reais (E0 2122–2324, 1140 jogos):** calibração boa
 (Brier 0.192 < base rates 0.212, curva ~diagonal) mas **sem CLV** (beat_closing 0.40).
 Confirma a tese do projeto: probabilidades confiáveis ≠ vencer a linha de fechamento.
 
-**Ainda NÃO existe:** persistência (sem `models.py`/`db.py`/Alembic), `worker/run.py`,
-`services/train.py`, camada `api/`, frontend, GitHub Actions. ETL hoje devolve DataFrame
-em memória (ainda não grava em banco) — foi a escolha deliberada de "ver os dados antes do schema".
+**Persistência (Fase 1) PRONTA** — Neon Postgres 17 (sa-east-1) provisionado; `DATABASE_URL`
+em `backend/.env` (gitignored). Pipeline validado ponta a ponta no Neon: **E0 ingerido**
+(1140 jogos / 3 temporadas 2324–2526, 3 ModelRuns, 7980 Predictions); backtest lê do banco
+via `load_matches_df`. **87 testes verdes** (incl. guarda de drift de migration), ruff limpo.
+
+**Ainda NÃO existe:** camada `api/` (read-API serverless), frontend, GitHub Actions
+(`train.yml`). E o **Brasil (BRA) ainda não ingere**: o football-data serve a BRA no feed
+`/new/BRA.csv` (arquivo único, colunas diferentes), não no `mmz4281/{season}/` que o
+`season_url` monta — precisa de um parser próprio (usar skill `add-league`).
 
 ---
 
@@ -58,31 +71,34 @@ em memória (ainda não grava em banco) — foi a escolha deliberada de "ver os 
 
 ---
 
-## 4. Próximos passos — fechar a Fase 1 (persistência + multi-liga)
+## 4. Fase 1 — fechada (persistência + multi-liga). O que falta
 
-Ordem sugerida (TDD onde houver lógica; migrations não precisam de teste):
+Itens 1–5 **prontos** (TDD; ver tabela da seção 1). Item 6 **parcial**: 4 europeias
+ingeridas, Brasil pendente. **Decisões resolvidas nesta sessão:**
+(a) **Neon** p/ app+migrations, **SQLite in-memory** p/ testes (schema dialect-agnóstico);
+(b) `Prediction` por **(run, match, market, selection)** — todos os mercados de uma vez;
+(c) backtest **lê do banco** via `load_matches_df`, mantendo o `walk_forward_clv` puro.
 
-1. **`models.py` (SQLAlchemy 2.0) + `db.py`** — `Team`, `League(+season)`, `Match`
-   (placar `None` = jogo futuro, FK liga+season), `Odds` (abertura/fechamento por mercado,
-   FK match), `ModelRun` (por liga, append-only), `Prediction` (por run+match+market, append-only).
-   `db.py` = engine/session (SQLite local via `settings.database_url`; Neon fica p/ Fase 2).
-2. **Alembic** — `alembic init`, configurar `target_metadata`, 1ª migration; remover qualquer `create_all`.
-   (Atenção: SQLite precisa de `render_as_batch=True` p/ ALTER.)
-3. **ETL persistente** — função que pega o DataFrame do `football_data.load()` e faz **upsert
-   idempotente** em `Match`/`Odds` (chave natural: liga+season+date+home+away). Nunca toca Prediction.
-4. **`services/train.py`** — itera por `(liga, temporada)`, faz `dixon_coles.fit` por liga (use `xi>0`),
-   grava um `ModelRun` por liga + `Prediction` por match/market. Reaproveita `domain/`.
-5. **`worker/run.py`** — entrypoint `python -m worker.run`: ETL (ligas do registry) → train. Sem HTTP.
-6. **Multi-liga** — baixar as 5 europeias + Brasil (registry já tem; siga `.claude/skills/add-league`),
-   smoke test por liga, marcar histórico curto onde o CLV é menos confiável.
+Próximos passos:
 
-**Decisões a confirmar no início da próxima sessão:** (a) SQLite local agora vs. já apontar Neon;
-(b) granularidade de `Prediction` (todos os mercados 1X2/OU2.5/BTTS de uma vez?); (c) backtest deve
-ler do banco ou continuar consumindo DataFrame.
+1. **Brasil (BRA)** — adicionar parser do feed `/new/BRA.csv` (arquivo único, todas as
+   temporadas, colunas de odds diferentes; filtrar por ano). Usar skill `add-league`.
+   Só então `worker.run --leagues BRA`.
+2. **Perf do upsert** — hoje é linha-a-linha sobre a rede (~3 min/liga/3 temporadas no Neon).
+   Trocar por `bulk_insert`/batch quando incomodar (não muda correção, só velocidade).
+3. **Fase 2 — Odds ao vivo + deploy:** The Odds API (captura write-once da linha de
+   FECHAMENTO — não sobrescrever como o ETL atual faz), `train.yml` no Actions, endpoint
+   leve `refresh-odds`/`recompute-value` na Vercel + scheduler externo.
+4. **Camada `api/`** — read-API serverless (sem scipy): `/api/clv`, `/api/calibration`,
+   jogos+probabilidades+value bets a partir de `ModelRun`/`Prediction`/`Odds` pré-computados.
+5. **Mercados OU25/BTTS no ETL** — `Prediction`/schema já suportam; falta o parser de odds
+   desses mercados em `football_data.py` (hoje só persiste 1X2).
+6. **Fase 3 — Frontend:** dashboard por liga + painéis de CLV histórico e calibração.
 
 ### Verificação rápida ao abrir a sessão
 ```bash
 cd backend && .venv/bin/python -m pytest -q && .venv/bin/ruff check app/ tests/
 ```
-Demo end-to-end de referência (rede): havia um script em scratchpad fazendo
-`football_data.load("E0", ...)` → `backtest.walk_forward_clv`; replicável em `worker/run.py`.
+Pipeline end-to-end (rede; rodar com sandbox desabilitado):
+`python -m worker.run --seasons 2324 2425 2526 --leagues E0` (ETL→train no Neon).
+Backtest do banco: `load_matches_df(session, "E0", "2526")` → `backtest.walk_forward_clv`.

@@ -10,6 +10,7 @@ pydantic-settings~=2.14.0
 # Persistência
 SQLAlchemy~=2.0.47
 psycopg[binary]          # driver Postgres (Neon na produção)
+alembic                  # migrations (Fase 1; render_as_batch p/ SQLite local/tests)
 
 # Ciência de dados (domínio + batch — PROIBIDO na read-API)
 numpy
