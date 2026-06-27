@@ -145,6 +145,68 @@ class TestFitRecoversSyntheticStrengths:
         assert rec == sorted(rec, reverse=True)
 
 
+class TestScoreMatrixStaysNonNegative:
+    """rho no extremo + placar alto faria tau(0,0) < 0 — a matriz não pode ter
+    células negativas nem produzir probabilidades fora de [0, 1]."""
+
+    def test_extreme_rho_high_scoring_is_valid_distribution(self):
+        m = dc.DixonColesModel(
+            teams=["A", "B"],
+            attack={"A": 0.9, "B": 0.9},
+            defense={"A": 0.9, "B": 0.9},
+            home_adv=0.3,
+            rho=0.2,
+        )
+        lam, mu = m.expected_goals("A", "B")
+        assert lam * mu * 0.2 > 1.0  # confirma que tau(0,0) cru seria negativo
+
+        mat = m.score_matrix("A", "B", max_goals=10, normalize=False)
+        assert (mat >= 0).all()
+
+        pred = m.predict("A", "B")
+        for v in pred.values():
+            assert 0.0 <= v <= 1.0
+        assert pred["home_win"] + pred["draw"] + pred["away_win"] == pytest.approx(1.0)
+
+
+class TestTemporalDecay:
+    """Exercita o decaimento temporal xi (antes sem cobertura): com recência forte,
+    o ajuste deve seguir o regime recente, não a média de todo o histórico."""
+
+    @staticmethod
+    def _phase(rng, att_t0, n_rounds, start_day):
+        teams = ["T0", "T1", "T2"]
+        att = {"T0": att_t0, "T1": 0.0, "T2": 0.0}
+        rows = []
+        day = start_day
+        for _ in range(n_rounds):
+            for i in teams:
+                for j in teams:
+                    if i == j:
+                        continue
+                    lam = math.exp(att[i] + 0.2)  # def=0, home_adv=0.2
+                    mu = math.exp(att[j])
+                    rows.append(
+                        (day, i, j, int(rng.poisson(lam)), int(rng.poisson(mu)))
+                    )
+                    day += pd.Timedelta(days=1)
+        return rows, day
+
+    def test_recency_weighting_pulls_strength_to_recent_regime(self):
+        rng = np.random.default_rng(3)
+        old, day = self._phase(
+            rng, att_t0=-0.6, n_rounds=8, start_day=pd.Timestamp("2024-01-01")
+        )
+        new, _ = self._phase(rng, att_t0=0.6, n_rounds=8, start_day=day)
+        cols = ["date", "home", "away", "home_goals", "away_goals"]
+        df = pd.DataFrame(old + new, columns=cols)
+
+        flat = dc.fit(df, xi=0.0)
+        recent = dc.fit(df, xi=0.05)
+        # T0 era fraco no passado e forte no presente → recência eleva seu ataque
+        assert recent.attack["T0"] > flat.attack["T0"]
+
+
 class TestFitValidation:
     def test_rejects_missing_columns(self):
         df = pd.DataFrame({"home": ["A"], "away": ["B"]})

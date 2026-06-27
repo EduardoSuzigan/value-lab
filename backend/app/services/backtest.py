@@ -1,11 +1,16 @@
 """Backtest walk-forward de CLV + calibração para UMA liga.
 
 Camada de SERVICES: orquestra o domínio (dixon_coles + eval) sobre um histórico
-de partidas com odds de abertura e fechamento. NUNCA otimiza por ROID histórico —
+de partidas com odds de abertura e fechamento. NUNCA otimiza por ROI histórico —
 o critério honesto é o CLV (odds de entrada vs. linha de FECHAMENTO) e a calibração.
+`avg_ev` é o EV MODELADO das apostas escolhidas (otimista por construção, não é ROI
+realizado): use-o como diagnóstico, e reporte `beat_closing_rate` + calibração como
+as métricas honestas.
 
 Para multi-liga, o chamador itera por liga e roda este backtest por liga (fit por
-liga, nunca pooled — ver .claude/rules/per-league-fit.md).
+liga, nunca pooled — ver .claude/rules/per-league-fit.md). Sobre liga real (Fase 1+),
+passe `xi > 0`: o walk-forward treina sobre todo o passado da liga e, sem decaimento,
+mistura temporadas com peso igual (ignora promoção/rebaixamento).
 
 Schema esperado de `matches` (DataFrame), uma liga, ordenável por `date`:
     date, home, away, home_goals, away_goals,

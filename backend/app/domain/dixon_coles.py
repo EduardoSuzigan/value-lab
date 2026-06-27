@@ -62,11 +62,11 @@ class DixonColesModel:
         px = np.exp(gx * np.log(lam) - lam - gammaln(gx + 1))
         py = np.exp(gx * np.log(mu) - mu - gammaln(gx + 1))
         mat = np.outer(px, py)
-        # correção de placares baixos
+        # correção de placares baixos; clipa tau >= _TAU_EPS (igual à verossimilhança)
+        # para que rho extremo + placar alto nunca produza célula/probabilidade < 0.
         for x, y in ((0, 0), (0, 1), (1, 0), (1, 1)):
-            mat[x, y] *= _tau(
-                np.array(x), np.array(y), np.array(lam), np.array(mu), self.rho
-            )
+            tau = _tau(np.array(x), np.array(y), np.array(lam), np.array(mu), self.rho)
+            mat[x, y] *= float(np.clip(tau, _TAU_EPS, None))
         if normalize:
             mat = mat / mat.sum()
         return mat
@@ -140,7 +140,7 @@ def fit(
         [(-3.0, 3.0)] * (n - 1)  # att_free
         + [(-3.0, 3.0)] * n  # def
         + [(-1.0, 2.0)]  # home_adv
-        + [(-0.2, 0.2)]  # rho (mantém tau > 0)
+        + [(-0.2, 0.2)]  # rho: faixa pequena (DC); tau é clipado onde necessário
     )
 
     res = minimize(neg_log_lik, p0, method="L-BFGS-B", bounds=bounds)
