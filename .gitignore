@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Env / secrets — NUNCA commitar (CLAUDE.md: segredos via Settings/.env/Actions Secrets)
+.env
+.env.*
+!.env.example
+
+# Dados locais / artefatos
+*.sqlite
+*.db
+data/
+*.csv
+!backend/tests/**/*.csv
+
+# Node / frontend (Fase 3)
+node_modules/
+frontend/dist/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

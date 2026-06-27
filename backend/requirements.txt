@@ -1,0 +1,21 @@
+# value-lab backend/batch — pesado (scipy/numpy/pandas vivem AQUI, nunca na função serverless).
+# Versões alinhadas ao CLAUDE.md (verificadas jun/2026). Pinos com ~= para permitir patches.
+
+# Web / API (a read-API é servida pela Vercel a partir de api/; aqui é dev local + services)
+fastapi[standard]~=0.132.0
+uvicorn
+pydantic~=2.13.0
+pydantic-settings~=2.14.0
+
+# Persistência
+SQLAlchemy~=2.0.47
+psycopg[binary]          # driver Postgres (Neon na produção)
+
+# Ciência de dados (domínio + batch — PROIBIDO na read-API)
+numpy
+scipy
+pandas
+
+# Dev / testes (Fase 0 — harness-first)
+pytest
+ruff

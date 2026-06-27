@@ -1,0 +1,33 @@
+{
+  "$comment": "Guard-rails determinísticos do value-lab. Hooks rodam com suas credenciais — revise os scripts. Ajuste a sintaxe de 'permissions' conforme sua versão do CLI.",
+  "permissions": {
+    "allow": [
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(alembic:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": ".claude/hooks/guard-api-imports.sh" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": ".claude/hooks/format.sh" },
+          { "type": "command", "command": ".claude/hooks/test-domain.sh" }
+        ]
+      }
+    ]
+  }
+}
