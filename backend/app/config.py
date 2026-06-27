@@ -1,4 +1,7 @@
-"""Configuração central. Segredos SEMPRE via env / .env / Actions Secrets — nunca no código."""
+"""Configuração central.
+
+Segredos SEMPRE via env / .env / Actions Secrets — nunca no código.
+"""
 
 from __future__ import annotations
 
